@@ -1,0 +1,7 @@
+{
+  "chat.agent.enabled": false,
+  "chat.checkpoints.enabled": false,
+  "chat.commandCenter.enabled": false,
+  "chat.detectParticipant.enabled": false,
+  "liveServer.settings.port": 5502
+}
