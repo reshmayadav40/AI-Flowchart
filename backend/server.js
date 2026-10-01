@@ -306,7 +306,7 @@ app.post("/api/flowchart-from-image", upload.single("image"), async (req, res) =
     // Cleanup uploaded temp file
     try {
       fs.unlinkSync(filePath);
-    } catch (e) {}
+    } catch (e) { }
 
     // 3. Handle errors or missing results
     if (!resultText) {
@@ -338,7 +338,7 @@ app.post("/api/flowchart-from-image", upload.single("image"), async (req, res) =
     if (req.file) {
       try {
         fs.unlinkSync(req.file.path);
-      } catch (e) {}
+      } catch (e) { }
     }
     res.status(500).json({
       error: "Image processing failed: " + err.message,

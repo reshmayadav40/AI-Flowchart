@@ -25,6 +25,21 @@ function App() {
       .catch(() => setBackendConnected(false));
   }, [API_BASE_URL]);
 
+  const [pendingFallback, setPendingFallback] = useState(null);
+
+  const loadFallback = (customData) => {
+    const data = customData || pendingFallback;
+    if (!data) return;
+    const initialVars = {};
+    (data.variables || []).forEach(v => {
+      initialVars[v.toLowerCase()] = 0;
+    });
+    setVariables(initialVars);
+    setFlowchartData(data);
+    setStatus('ℹ️ Demo flowchart loaded.');
+    setPendingFallback(null);
+  };
+
   const handleGenerate = async () => {
     if (!mode) return alert('Select an input mode first!');
     if (mode === 'text' && !algorithm.trim()) return alert('Please write an algorithm.');
@@ -35,6 +50,7 @@ function App() {
     setStatus('⚙ Analyzing with AI...');
     setFlowchartData(null);
     setDryRunState(null);
+    setPendingFallback(null);
 
     try {
       let res;
@@ -54,7 +70,12 @@ function App() {
       }
 
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Server error.');
+      if (!res.ok) {
+        if (data.fallbackData) {
+          setPendingFallback(data.fallbackData);
+        }
+        throw new Error(data.error || 'Server error.');
+      }
       
       if (!data.nodes || !data.nodes.length) {
         throw new Error("No nodes found in AI response. Try a clearer image or rewrite the algorithm.");
@@ -384,7 +405,31 @@ function App() {
             {loading ? 'Processing via AI...' : 'Generate Graph'}
           </button>
 
-          {error && <div className="error-box"><XCircle size={18}/> {error}</div>}
+          {error && (
+            <div className="error-box" style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', alignItems: 'flex-start' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <XCircle size={18}/> <span>{error}</span>
+              </div>
+              {pendingFallback && (
+                <button 
+                  type="button"
+                  style={{
+                    padding: '0.45rem 0.9rem',
+                    background: '#2563EB',
+                    color: '#ffffff',
+                    border: 'none',
+                    borderRadius: '6px',
+                    cursor: 'pointer',
+                    fontWeight: 500,
+                    fontSize: '0.85rem'
+                  }}
+                  onClick={() => loadFallback()}
+                >
+                  ▶ Load Demo Flowchart (Test Simulator)
+                </button>
+              )}
+            </div>
+          )}
           {status && <div className="success-box"><CheckCircle2 size={18}/> {status}</div>}
         </section>
 
