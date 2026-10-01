@@ -12,6 +12,7 @@ function App() {
   
   const [flowchartData, setFlowchartData] = useState(null);
   const [expectedOutput, setExpectedOutput] = useState('');
+  const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000').replace(/\/$/, '');
   const [variables, setVariables] = useState({});
   const [dryRunState, setDryRunState] = useState(null);
 
@@ -19,10 +20,10 @@ function App() {
   const [backendConnected, setBackendConnected] = useState(true);
 
   useEffect(() => {
-    fetch('http://localhost:5000/api/ping')
+    fetch(`${API_BASE_URL}/api/ping`)
       .then(res => setBackendConnected(res.ok))
       .catch(() => setBackendConnected(false));
-  }, []);
+  }, [API_BASE_URL]);
 
   const handleGenerate = async () => {
     if (!mode) return alert('Select an input mode first!');
@@ -38,7 +39,7 @@ function App() {
     try {
       let res;
       if (mode === 'text') {
-        res = await fetch('http://localhost:5000/api/flowchart-from-text', {
+        res = await fetch(`${API_BASE_URL}/api/flowchart-from-text`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ algorithm })
@@ -46,7 +47,7 @@ function App() {
       } else {
         const formData = new FormData();
         formData.append('image', file);
-        res = await fetch('http://localhost:5000/api/flowchart-from-image', {
+        res = await fetch(`${API_BASE_URL}/api/flowchart-from-image`, {
           method: 'POST',
           body: formData
         });
@@ -69,7 +70,7 @@ function App() {
     } catch (err) {
       console.error(err);
       setError(err.message.includes('Failed to fetch') 
-        ? 'Backend unreachable. Ensure server is running on port 5000.' 
+        ? 'Backend unreachable. Ensure server is running and accessible.' 
         : err.message);
       setStatus('');
     } finally {
@@ -348,7 +349,7 @@ function App() {
         <p>A reactive tutor that visualizes algorithms and dry-runs them.</p>
         {!backendConnected && (
           <div className="alert-red">
-            <AlertTriangle size={18} /> Backend unreachable (Port 5000 is down)
+            <AlertTriangle size={18} /> Backend unreachable (Server is down or offline)
           </div>
         )}
       </header>

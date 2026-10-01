@@ -1,9 +1,25 @@
-node_modules
+# Dependencies
+node_modules/
+
+# Environment files
 .env
+.env.*
+!.env.example
+
+# Temporary uploads
+uploads/
+backend/uploads/
+
+# Build artifacts
+dist/
+build/
 .vercel
-dist
-build
-coverage
+
+# Logs and OS
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
 .DS_Store
-npm-debug.log
-yarn-error.log
+Thumbs.db
+
