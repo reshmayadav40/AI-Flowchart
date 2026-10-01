@@ -6,9 +6,22 @@ import dotenv from "dotenv";
 import Groq from "groq-sdk";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
-dotenv.config({ path: './.env', override: true });
+dotenv.config({ path: "./.env", override: true });
 
-console.log("📝 Loaded Env Vars:", Object.keys(process.env).filter(k => k.includes("API_KEY") || k === "PORT"));
+function cleanKey(val) {
+  if (!val) return "";
+  return val.toString().trim().replace(/^["']|["']$/g, "").trim();
+}
+
+const GEMINI_API_KEY = cleanKey(process.env.GEMINI_API_KEY);
+const GROQ_API_KEY = cleanKey(process.env.GROQ_API_KEY);
+
+console.log("📝 Loaded Env Vars:", {
+  hasGeminiKey: !!GEMINI_API_KEY,
+  geminiKeyLength: GEMINI_API_KEY ? GEMINI_API_KEY.length : 0,
+  hasGroqKey: !!GROQ_API_KEY,
+  port: process.env.PORT || 5000,
+});
 
 const app = express();
 app.use(cors());
@@ -19,23 +32,23 @@ app.get("/", (req, res) => {
 });
 
 app.get("/api/ping", (req, res) => {
-  res.json({ status: "ok", time: new Date().toISOString() });
+  res.json({
+    status: "ok",
+    hasGeminiKey: !!GEMINI_API_KEY,
+    time: new Date().toISOString(),
+  });
 });
 
 const upload = multer({ dest: "uploads/" });
 
 /* ================= AI CLIENTS SETUP ================= */
 
-const groq = process.env.GROQ_API_KEY ? new Groq({ apiKey: process.env.GROQ_API_KEY }) : null;
-const genAI = process.env.GEMINI_API_KEY ? new GoogleGenerativeAI(process.env.GEMINI_API_KEY) : null;
+const genAI = GEMINI_API_KEY ? new GoogleGenerativeAI(GEMINI_API_KEY) : null;
+const groq = GROQ_API_KEY ? new Groq({ apiKey: GROQ_API_KEY }) : null;
 
-if (!groq && !genAI) {
-  console.log("⚠️ No AI API keys found in process.env");
+if (!genAI && !groq) {
+  console.log("⚠️ No AI API keys found. Please set GEMINI_API_KEY in environment.");
 }
-
-process.on('exit', (code) => {
-  console.log(`🚫 Process exiting with code: ${code}`);
-});
 
 /* ================= HELPER: CLEAN JSON ================= */
 
@@ -63,16 +76,16 @@ const MOCK_FLOWCHART = {
     { id: "2", type: "process", text: "sum = a + b" },
     { id: "3", type: "decision", text: "sum > 10" },
     { id: "4", type: "output", text: "Output (sum)" },
-    { id: "5", type: "end", text: "End" }
+    { id: "5", type: "end", text: "End" },
   ],
   edges: [
     { from: "1", to: "2" },
     { from: "2", to: "3" },
     { from: "3", to: "4", label: "yes" },
     { from: "3", to: "5", label: "no" },
-    { from: "4", to: "5" }
+    { from: "4", to: "5" },
   ],
-  variables: ["a", "b"]
+  variables: ["a", "b"],
 };
 
 /* ================= FLOWCHART PROMPT ================= */
@@ -101,6 +114,37 @@ Rules:
 6. Extract all variable names used in the flowchart.
 `;
 
+const MODERN_GEMINI_MODELS = [
+  // Gemini 2.5 Series
+  "gemini-2.5-flash",
+  "gemini-2.5-pro",
+
+  // Gemini 2.0 Series
+  "gemini-2.0-flash",
+  "gemini-2.0-flash-lite",
+  "gemini-2.0-pro-exp-02-05",
+  "gemini-2.0-flash-thinking-exp",
+
+  // Dynamic Latest Aliases
+  "gemini-flash-latest",
+  "gemini-pro-latest",
+
+  // Gemini 1.5 LTS Series
+  "gemini-1.5-flash",
+  "gemini-1.5-pro",
+  "gemini-1.5-flash-8b",
+];
+
+function isInvalidKeyError(err) {
+  const msg = (err?.message || "").toLowerCase();
+  return (
+    msg.includes("api_key_invalid") ||
+    msg.includes("api key not valid") ||
+    msg.includes("invalid api key") ||
+    msg.includes("permission_denied")
+  );
+}
+
 /* ================= TEXT TO FLOWCHART ================= */
 
 app.post("/api/flowchart-from-text", async (req, res) => {
@@ -113,20 +157,13 @@ app.post("/api/flowchart-from-text", async (req, res) => {
     }
 
     let resultText = "";
-    console.log("🤖 [TEXT] Calling AI...");
+    let lastError = null;
+    let keyInvalid = false;
 
+    // 1. Try Gemini
     if (genAI) {
-      const modelsToTry = [
-        "gemini-2.5-flash", "gemini-2.5-pro", 
-        "gemini-flash-latest", "gemini-pro-latest", 
-        "gemini-2.0-flash", 
-        "gemini-1.5-flash", "gemini-1.5-pro", "gemini-1.5-flash-8b", 
-        "gemini-pro", "gemini-pro-vision"
-      ];
-      let success = false;
-      let lastError = null;
-
-      for (const modelName of modelsToTry) {
+      console.log("🤖 [TEXT] Calling Google Gemini...");
+      for (const modelName of MODERN_GEMINI_MODELS) {
         try {
           console.log(`⏳ Trying model: ${modelName}...`);
           const model = genAI.getGenerativeModel({ model: modelName });
@@ -134,37 +171,66 @@ app.post("/api/flowchart-from-text", async (req, res) => {
           const result = await model.generateContent(prompt);
           resultText = result.response.text();
           console.log(`✅ Success with model: ${modelName}`);
-          success = true;
           break;
         } catch (mErr) {
-          console.error(`⚠️ Model ${modelName} logic failed:`, mErr.message);
+          console.error(`⚠️ Model ${modelName} failed:`, mErr.message);
           lastError = mErr;
+          if (isInvalidKeyError(mErr)) {
+            keyInvalid = true;
+            console.error("🚫 Gemini API Key is invalid. Halting Gemini model retries.");
+            break;
+          }
         }
       }
+    }
 
-      if (!success) throw new Error(`All Gemini models failed. Last error: ${lastError?.message}`);
-    } else if (groq) {
-      const chatCompletion = await groq.chat.completions.create({
-        messages: [{ role: "user", content: `${FLOWCHART_PROMPT_SYSTEM}\n\nAlgorithm:\n${algorithm}` }],
-        model: "llama3-70b-8192",
-        temperature: 0.1,
+    // 2. Fallback to Groq if Gemini failed or wasn't configured
+    if (!resultText && groq) {
+      try {
+        console.log("🔄 Trying Groq fallback for text...");
+        const chatCompletion = await groq.chat.completions.create({
+          messages: [{ role: "user", content: `${FLOWCHART_PROMPT_SYSTEM}\n\nAlgorithm:\n${algorithm}` }],
+          model: "llama-3.3-70b-versatile",
+          temperature: 0.1,
+        });
+        resultText = chatCompletion.choices[0]?.message?.content || "";
+        console.log("✅ Success with Groq Llama 3.3");
+      } catch (gErr) {
+        console.error("⚠️ Groq fallback failed:", gErr.message);
+      }
+    }
+
+    // 3. If still no result, handle error gracefully
+    if (!resultText) {
+      if (keyInvalid || !GEMINI_API_KEY) {
+        return res.status(400).json({
+          error: "Invalid or missing Gemini API key. Please get a free key from https://aistudio.google.com and set GEMINI_API_KEY in your Render dashboard under Environment.",
+          fallbackData: MOCK_FLOWCHART,
+        });
+      }
+      return res.status(500).json({
+        error: `AI processing failed: ${lastError?.message || "No AI model available"}. Please try again.`,
+        fallbackData: MOCK_FLOWCHART,
       });
-      resultText = chatCompletion.choices[0]?.message?.content || "";
-    } else {
-      throw new Error("No AI service available");
     }
 
     const parsed = extractJSON(resultText);
-    if (!parsed) {
+    if (!parsed || !parsed.nodes || parsed.nodes.length === 0) {
       console.error("❌ [TEXT] AI returned invalid JSON:", resultText);
-      return res.status(500).json({ error: "AI failed to generate a valid data structure. Please try rephrasing your algorithm." });
+      return res.status(500).json({
+        error: "AI failed to generate a valid data structure. Please try rephrasing your algorithm.",
+        fallbackData: MOCK_FLOWCHART,
+      });
     }
 
     console.log("✅ [TEXT] Successfully parsed flowchart. Nodes:", parsed.nodes?.length);
     res.json(parsed);
   } catch (err) {
     console.error("❌ [TEXT] Server Error:", err.message);
-    res.status(500).json({ error: "Internal Server Error: " + err.message });
+    res.status(500).json({
+      error: "Internal Server Error: " + err.message,
+      fallbackData: MOCK_FLOWCHART,
+    });
   }
 });
 
@@ -175,79 +241,109 @@ app.post("/api/flowchart-from-image", upload.single("image"), async (req, res) =
   try {
     if (!req.file) {
       console.log("❌ [IMAGE] No file provided");
-      return res.status(400).json({ error: "Image required" });
+      return res.status(400).json({ error: "Image file is required." });
     }
 
     const filePath = req.file.path;
     const imageBuffer = fs.readFileSync(filePath);
     const base64Image = imageBuffer.toString("base64");
-    const mimeType = req.file.mimetype;
+    const mimeType = req.file.mimetype || "image/png";
 
     let resultText = "";
+    let lastError = null;
+    let keyInvalid = false;
 
+    // 1. Try Gemini Vision models
     if (genAI) {
-      const modelsToTry = [
-        "gemini-2.5-flash", "gemini-2.5-pro", 
-        "gemini-flash-latest", "gemini-pro-latest", 
-        "gemini-2.0-flash", 
-        "gemini-1.5-flash", "gemini-1.5-pro", "gemini-1.5-flash-8b", 
-        "gemini-pro-vision"
-      ];
-      let success = false;
-      let lastError = null;
-
-      for (const modelName of modelsToTry) {
+      console.log("🤖 [IMAGE] Calling Google Gemini Vision...");
+      for (const modelName of MODERN_GEMINI_MODELS) {
         try {
           console.log(`⏳ Trying model: ${modelName}...`);
           const model = genAI.getGenerativeModel({ model: modelName });
           const result = await model.generateContent([
             FLOWCHART_PROMPT_SYSTEM,
-            { inlineData: { data: base64Image, mimeType } }
+            { inlineData: { data: base64Image, mimeType } },
           ]);
           resultText = result.response.text();
           console.log(`✅ Success with model: ${modelName}`);
-          success = true;
           break;
         } catch (mErr) {
           console.error(`⚠️ Model ${modelName} failed:`, mErr.message);
           lastError = mErr;
+          if (isInvalidKeyError(mErr)) {
+            keyInvalid = true;
+            console.error("🚫 Gemini API Key is invalid. Halting Gemini model retries.");
+            break;
+          }
         }
       }
-
-      if (!success) throw new Error(`All Gemini models failed. Last error: ${lastError?.message}`);
-    } else if (groq) {
-      // Use Groq Vision if available
-      const chatCompletion = await groq.chat.completions.create({
-        model: "llama-3.2-11b-vision-preview",
-        messages: [
-          {
-            role: "user",
-            content: [
-              { type: "text", text: FLOWCHART_PROMPT_SYSTEM },
-              { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64Image}` } }
-            ],
-          },
-        ],
-        temperature: 0.1,
-      });
-      resultText = chatCompletion.choices[0]?.message?.content || "";
     }
 
-    // Cleanup file
-    try { fs.unlinkSync(filePath); } catch (e) {}
+    // 2. Fallback to Groq Vision if Gemini failed or wasn't configured
+    if (!resultText && groq) {
+      try {
+        console.log("🔄 Trying Groq Vision fallback...");
+        const chatCompletion = await groq.chat.completions.create({
+          model: "llama-3.2-11b-vision-preview",
+          messages: [
+            {
+              role: "user",
+              content: [
+                { type: "text", text: FLOWCHART_PROMPT_SYSTEM },
+                { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64Image}` } },
+              ],
+            },
+          ],
+          temperature: 0.1,
+        });
+        resultText = chatCompletion.choices[0]?.message?.content || "";
+        console.log("✅ Success with Groq Vision");
+      } catch (gErr) {
+        console.error("⚠️ Groq Vision failed:", gErr.message);
+      }
+    }
+
+    // Cleanup uploaded temp file
+    try {
+      fs.unlinkSync(filePath);
+    } catch (e) {}
+
+    // 3. Handle errors or missing results
+    if (!resultText) {
+      if (keyInvalid || !GEMINI_API_KEY) {
+        return res.status(400).json({
+          error: "Invalid or missing Gemini API key. Please get a free API key at https://aistudio.google.com and set GEMINI_API_KEY in your Render dashboard (Environment tab).",
+          fallbackData: MOCK_FLOWCHART,
+        });
+      }
+      return res.status(500).json({
+        error: `AI vision processing failed: ${lastError?.message || "No AI model available"}. Try a clearer photo.`,
+        fallbackData: MOCK_FLOWCHART,
+      });
+    }
 
     const parsed = extractJSON(resultText);
-    if (!parsed) {
+    if (!parsed || !parsed.nodes || parsed.nodes.length === 0) {
       console.error("❌ [IMAGE] AI returned invalid JSON:", resultText);
-      return res.status(500).json({ error: "AI could not read the flowchart in your image. Try a clearer photo." });
+      return res.status(500).json({
+        error: "AI could not read the flowchart in your image. Try a clearer photo or enter algorithm as text.",
+        fallbackData: MOCK_FLOWCHART,
+      });
     }
 
     console.log("✅ [IMAGE] Successfully parsed flowchart. Nodes:", parsed.nodes?.length);
     res.json(parsed);
   } catch (err) {
     console.error("❌ [IMAGE] Server Error:", err.message);
-    if (req.file) { try { fs.unlinkSync(req.file.path); } catch (e) {} }
-    res.status(500).json({ error: "Image processing failed: " + err.message });
+    if (req.file) {
+      try {
+        fs.unlinkSync(req.file.path);
+      } catch (e) {}
+    }
+    res.status(500).json({
+      error: "Image processing failed: " + err.message,
+      fallbackData: MOCK_FLOWCHART,
+    });
   }
 });
 
