@@ -137,6 +137,8 @@ app.get("/api/ping", (req, res) => {
   });
 });
 
+
+
 /* ================= AUTHENTICATION ROUTES ================= */
 
 app.post("/api/auth/signup", async (req, res) => {
@@ -416,7 +418,7 @@ const MOCK_FLOWCHART = generateFallbackFlowchart("loop 1 to 4");
 
 const FLOWCHART_PROMPT_SYSTEM = `
 You are an expert flowchart analyzer and generator.
-Convert the provided input (algorithm or image) into a structured graph-based JSON for an interactive dry run simulator.
+Convert the provided input (algorithm or handwritten image) into a structured graph-based JSON for an interactive dry run simulator.
 
 STRICT JSON FORMAT:
 {
@@ -429,23 +431,24 @@ STRICT JSON FORMAT:
   "variables": ["var1", "var2"]
 }
 
-Rules:
-1. 'start' and 'end' nodes are mandatory.
-2. 'decision' nodes MUST have exactly two outgoing edges labeled 'yes' and 'no'.
-3. 'input' nodes MUST have type 'input' and format 'Input (var1, var2)' or 'Input (N)'.
-4. 'process' nodes should contain explicit assignments like 'x = 10', 'i = 1', 'x = x + 1', or 'count = count + 1'. If handwriting has 'count++', transcribe as 'count = count + 1'.
-5. 'output' nodes should be in format 'Output (variable_name)' or 'Print (variable_name)'.
-6. Order nodes logically for a step-by-step traversal.
-7. CRITICAL for 'variables': Extract ONLY external user INPUT variables (e.g. from 'input' nodes like 'Input (a, b)' or 'Input (N)'). Do NOT include intermediate/calculated variables (like mul, div, add, count, sum) that are assigned inside 'process' nodes.
-8. CRITICAL for loop counters & initial values: Transcribe initial values accurately (e.g., if handwriting or text states 'i = 1' or starts at 1, transcribe 'i = 1', NEVER convert it to 'i = 0').
+CRITICAL RULES:
+1. 'start' and 'end' nodes are mandatory (or 'stop' as type 'end').
+2. 'decision' nodes MUST have exactly two outgoing edges labeled 'yes' and 'no' (if handwriting has 'T'/'F', map 'T' -> 'yes' and 'F' -> 'no').
+3. 'input' nodes MUST have type 'input' and format 'Input (var1)' or 'Input (N)'.
+4. 'process' nodes should contain explicit assignments like 'i = 1', 'x = x + 1', or 'i = i + 1'. If handwriting has 'i++' or 'count++', transcribe as 'i = i + 1' or 'count = count + 1'.
+5. 'output' nodes should be in format 'Print (variable_name)' or 'Output (variable_name)'.
+6. Follow all arrows and loops faithfully: trace every arrow from its source node to its target node (including loops that go back to a previous decision node).
+7. Transcribe ALL shapes from top to bottom, including multiple decision diamonds (e.g. 'i <= n' and 'n % i == 0').
+8. Extract ONLY true user input variables (e.g. 'n' from 'Input n'). Do NOT include initialized loop counters (like 'i') or intermediate variables in 'variables'.
+9. If handwriting has conditions like 'i <= n' or 'n % i == 0', transcribe them accurately.
+10. Return ONLY valid JSON matching the format above.
 `;
 
 const MODERN_GEMINI_MODELS = [
-  "gemini-1.5-flash",
-  "gemini-2.0-flash",
-  "gemini-1.5-pro",
-  "gemini-2.0-flash-lite",
-  "gemini-1.5-flash-8b",
+  "gemini-2.5-flash",
+  "gemini-3.5-flash-lite",
+  "gemini-3.8-flash",
+  "gemini-3.1-pro-preview",
 ];
 
 function isInvalidKeyError(err) {
@@ -481,34 +484,41 @@ app.post("/api/flowchart-from-text", async (req, res) => {
           const model = genAI.getGenerativeModel({ model: modelName });
           const prompt = `${FLOWCHART_PROMPT_SYSTEM}\n\nAlgorithm:\n${algorithm}`;
           const result = await model.generateContent(prompt);
-          resultText = result.response.text();
-          console.log(`✅ Success with model: ${modelName}`);
-          break;
+          const text = result.response.text();
+          const parsedCheck = extractJSON(text);
+          if (parsedCheck && parsedCheck.nodes && parsedCheck.nodes.length >= 2) {
+            resultText = text;
+            console.log(`✅ Success with model: ${modelName}`);
+            break;
+          }
         } catch (mErr) {
           console.error(`⚠️ Model ${modelName} failed:`, mErr.message);
           lastError = mErr;
-          if (isInvalidKeyError(mErr)) {
-            keyInvalid = true;
-            console.error("🚫 Gemini API Key is invalid. Halting Gemini model retries.");
-            break;
-          }
         }
       }
     }
 
     // 2. Fallback to Groq if Gemini failed or wasn't configured
     if (!resultText && groq) {
-      try {
-        console.log("🔄 Trying Groq fallback for text...");
-        const chatCompletion = await groq.chat.completions.create({
-          messages: [{ role: "user", content: `${FLOWCHART_PROMPT_SYSTEM}\n\nAlgorithm:\n${algorithm}` }],
-          model: "llama-3.3-70b-versatile",
-          temperature: 0.1,
-        });
-        resultText = chatCompletion.choices[0]?.message?.content || "";
-        console.log("✅ Success with Groq Llama 3.3");
-      } catch (gErr) {
-        console.error("⚠️ Groq fallback failed:", gErr.message);
+      const groqTextModels = ["qwen/qwen3.8-27b", "openai/gpt-oss-20b"];
+      for (const gm of groqTextModels) {
+        try {
+          console.log(`🔄 Trying Groq fallback (${gm})...`);
+          const chatCompletion = await groq.chat.completions.create({
+            messages: [{ role: "user", content: `${FLOWCHART_PROMPT_SYSTEM}\n\nAlgorithm:\n${algorithm}` }],
+            model: gm,
+            temperature: 0.1,
+          });
+          const text = chatCompletion.choices[0]?.message?.content || "";
+          const parsedCheck = extractJSON(text);
+          if (parsedCheck && parsedCheck.nodes && parsedCheck.nodes.length >= 2) {
+            resultText = text;
+            console.log(`✅ Success with Groq (${gm})`);
+            break;
+          }
+        } catch (gErr) {
+          console.error(`⚠️ Groq (${gm}) failed:`, gErr.message);
+        }
       }
     }
 
@@ -581,24 +591,23 @@ app.post("/api/flowchart-from-image", upload.single("image"), async (req, res) =
             FLOWCHART_PROMPT_SYSTEM,
             { inlineData: { data: base64Image, mimeType } },
           ]);
-          resultText = result.response.text();
-          console.log(`✅ Success with model: ${modelName}`);
-          break;
+          const text = result.response.text();
+          const parsedCheck = extractJSON(text);
+          if (parsedCheck && parsedCheck.nodes && parsedCheck.nodes.length >= 2) {
+            resultText = text;
+            console.log(`✅ Success with model: ${modelName}`);
+            break;
+          }
         } catch (mErr) {
           console.error(`⚠️ Model ${modelName} failed:`, mErr.message);
           lastError = mErr;
-          if (isInvalidKeyError(mErr)) {
-            keyInvalid = true;
-            console.error("🚫 Gemini API Key is invalid. Halting Gemini model retries.");
-            break;
-          }
         }
       }
     }
 
     // 2. Fallback to Groq Vision if Gemini failed or wasn't configured
     if (!resultText && groq) {
-      const groqVisionModels = ["llama-3.2-11b-vision-preview", "llama-3.2-90b-vision-preview"];
+      const groqVisionModels = ["qwen/qwen3.8-27b"];
       for (const gModel of groqVisionModels) {
         try {
           console.log(`🔄 Trying Groq Vision fallback (${gModel})...`);
@@ -615,8 +624,10 @@ app.post("/api/flowchart-from-image", upload.single("image"), async (req, res) =
             ],
             temperature: 0.1,
           });
-          resultText = chatCompletion.choices[0]?.message?.content || "";
-          if (resultText) {
+          const text = chatCompletion.choices[0]?.message?.content || "";
+          const parsedCheck = extractJSON(text);
+          if (parsedCheck && parsedCheck.nodes && parsedCheck.nodes.length >= 2) {
+            resultText = text;
             console.log(`✅ Success with Groq Vision (${gModel})`);
             break;
           }
@@ -631,30 +642,14 @@ app.post("/api/flowchart-from-image", upload.single("image"), async (req, res) =
       fs.unlinkSync(filePath);
     } catch (e) {}
 
-    // 3. Parse JSON or use interactive demonstration flowchart
-    let parsed = resultText ? extractJSON(resultText) : null;
+    // 3. Parse JSON or handle failure
+    const parsed = resultText ? extractJSON(resultText) : null;
     if (!parsed || !parsed.nodes || parsed.nodes.length === 0) {
-      console.log("ℹ️ [IMAGE] Generating interactive flowchart demonstration");
-      parsed = {
-        nodes: [
-          { id: "1", type: "start", text: "Start" },
-          { id: "2", type: "process", text: "i = 1" },
-          { id: "3", type: "decision", text: "i <= 4" },
-          { id: "4", type: "output", text: "Output (i)" },
-          { id: "5", type: "process", text: "i = i + 1" },
-          { id: "6", type: "end", text: "End" },
-        ],
-        edges: [
-          { from: "1", to: "2" },
-          { from: "2", to: "3" },
-          { from: "3", to: "4", label: "yes" },
-          { from: "4", to: "5" },
-          { from: "5", to: "3" },
-          { from: "3", to: "6", label: "no" },
-        ],
-        variables: ["i"],
-        notice: "Flowchart loaded. You can double-click or press ✏️ on any node to edit and dry-run.",
-      };
+      console.error("❌ [IMAGE] Could not parse flowchart from image. Raw text:", resultText);
+      return res.status(400).json({
+        error: "AI could not read the flowchart in your image. Please ensure the photo is clear, well-lit, and shows all flowchart shapes.",
+        fallbackData: MOCK_FLOWCHART,
+      });
     }
 
     console.log("✅ [IMAGE] Successfully parsed flowchart. Nodes:", parsed.nodes?.length);
