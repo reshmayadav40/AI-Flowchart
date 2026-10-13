@@ -130,6 +130,8 @@ app.get("/api/ping", (req, res) => {
   res.json({
     status: "ok",
     hasGeminiKey: !!GEMINI_API_KEY,
+    geminiKeyValidFormat: GEMINI_API_KEY ? GEMINI_API_KEY.startsWith("AIzaSy") : false,
+    hasGroqKey: !!GROQ_API_KEY,
     mongoConnected: isMongoConnected,
     time: new Date().toISOString(),
   });
@@ -488,10 +490,10 @@ app.post("/api/flowchart-from-text", async (req, res) => {
 
     // 3. If still no result, handle error gracefully
     if (!resultText) {
-      if (keyInvalid || !GEMINI_API_KEY) {
+      if (keyInvalid || !GEMINI_API_KEY || !GEMINI_API_KEY.startsWith("AIzaSy")) {
         return res.status(400).json({
           error:
-            "Invalid or missing Gemini API key. Please set GEMINI_API_KEY in your backend environment.",
+            "Invalid Gemini API Key. Google Gemini keys start with 'AIzaSy' (get a free key at https://aistudio.google.com/app/apikey). Please update GEMINI_API_KEY in Render Environment Variables.",
           fallbackData: MOCK_FLOWCHART,
         });
       }
@@ -589,25 +591,31 @@ app.post("/api/flowchart-from-image", upload.single("image"), async (req, res) =
 
     // 2. Fallback to Groq Vision if Gemini failed or wasn't configured
     if (!resultText && groq) {
-      try {
-        console.log("🔄 Trying Groq Vision fallback...");
-        const chatCompletion = await groq.chat.completions.create({
-          model: "llama-3.2-11b-vision-preview",
-          messages: [
-            {
-              role: "user",
-              content: [
-                { type: "text", text: FLOWCHART_PROMPT_SYSTEM },
-                { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64Image}` } },
-              ],
-            },
-          ],
-          temperature: 0.1,
-        });
-        resultText = chatCompletion.choices[0]?.message?.content || "";
-        console.log("✅ Success with Groq Vision");
-      } catch (gErr) {
-        console.error("⚠️ Groq Vision failed:", gErr.message);
+      const groqVisionModels = ["llama-3.2-11b-vision-preview", "llama-3.2-90b-vision-preview"];
+      for (const gModel of groqVisionModels) {
+        try {
+          console.log(`🔄 Trying Groq Vision fallback (${gModel})...`);
+          const chatCompletion = await groq.chat.completions.create({
+            model: gModel,
+            messages: [
+              {
+                role: "user",
+                content: [
+                  { type: "text", text: FLOWCHART_PROMPT_SYSTEM },
+                  { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64Image}` } },
+                ],
+              },
+            ],
+            temperature: 0.1,
+          });
+          resultText = chatCompletion.choices[0]?.message?.content || "";
+          if (resultText) {
+            console.log(`✅ Success with Groq Vision (${gModel})`);
+            break;
+          }
+        } catch (gErr) {
+          console.error(`⚠️ Groq Vision (${gModel}) failed:`, gErr.message);
+        }
       }
     }
 
@@ -618,15 +626,15 @@ app.post("/api/flowchart-from-image", upload.single("image"), async (req, res) =
 
     // 3. Handle errors or missing results
     if (!resultText) {
-      if (keyInvalid || !GEMINI_API_KEY) {
+      if (keyInvalid || !GEMINI_API_KEY || !GEMINI_API_KEY.startsWith("AIzaSy")) {
         return res.status(400).json({
           error:
-            "Invalid or missing Gemini API key. Please check your GEMINI_API_KEY environment variable.",
+            "Invalid Gemini API Key. Google Gemini keys start with 'AIzaSy' (get a free key at https://aistudio.google.com/app/apikey). Please update GEMINI_API_KEY in Render Environment Variables.",
           fallbackData: MOCK_FLOWCHART,
         });
       }
       return res.status(500).json({
-        error: `AI vision processing failed: ${lastError?.message || "No AI model available"}. Try a clearer photo.`,
+        error: `AI vision processing failed: ${lastError?.message || "No AI model available"}. Try a clearer photo or enter algorithm as text.`,
         fallbackData: MOCK_FLOWCHART,
       });
     }
