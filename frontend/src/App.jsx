@@ -452,7 +452,11 @@ function App() {
       }
 
       setupFlowchartVariables(data);
-      setStatus('✅ Flowchart ready & saved to MongoDB!');
+      if (data.notice) {
+        setStatus(`💡 ${data.notice}`);
+      } else {
+        setStatus('✅ Flowchart ready & saved to MongoDB!');
+      }
     } catch (err) {
       console.error(err);
       setError(
