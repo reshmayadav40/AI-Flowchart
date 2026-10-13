@@ -30,7 +30,11 @@ import {
 import './index.css';
 
 function App() {
-  const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000').replace(/\/$/, '');
+  let rawApiUrl = import.meta.env.VITE_API_BASE_URL || (import.meta.env.PROD ? 'https://ai-flowchart.onrender.com' : 'http://localhost:5000');
+  if (typeof rawApiUrl === 'string' && rawApiUrl.includes('ai-flowchart-2.onrender.com')) {
+    rawApiUrl = rawApiUrl.replace('ai-flowchart-2.onrender.com', 'ai-flowchart.onrender.com');
+  }
+  const API_BASE_URL = rawApiUrl.replace(/\/$/, '');
 
   // Authentication State
   const [user, setUser] = useState(() => {
