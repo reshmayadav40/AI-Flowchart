@@ -133,6 +133,7 @@ app.get("/api/ping", (req, res) => {
     hasGeminiKey: !!GEMINI_API_KEY,
     hasGroqKey: !!GROQ_API_KEY,
     mongoConnected: isMongoConnected,
+    dbName: mongoose.connection?.name || "none",
     time: new Date().toISOString(),
   });
 });
@@ -361,6 +362,38 @@ function extractJSON(text) {
 function generateFallbackFlowchart(algorithm = "") {
   const algoLower = (algorithm || "").toLowerCase();
   if (
+    algoLower.includes("factorial") ||
+    algoLower.includes("fact") ||
+    (algoLower.includes("sum") && algoLower.includes("*")) ||
+    (algoLower.includes("multiply") && algoLower.includes("loop"))
+  ) {
+    return {
+      nodes: [
+        { id: "1", type: "start", text: "Start" },
+        { id: "2", type: "input", text: "Input (n)" },
+        { id: "3", type: "process", text: "i = 1, Sum = 1" },
+        { id: "4", type: "decision", text: "i <= n" },
+        { id: "5", type: "process", text: "Sum = i * Sum" },
+        { id: "6", type: "process", text: "i = i + 1" },
+        { id: "7", type: "output", text: "Print (Sum)" },
+        { id: "8", type: "end", text: "Stop" },
+      ],
+      edges: [
+        { from: "1", to: "2" },
+        { from: "2", to: "3" },
+        { from: "3", to: "4" },
+        { from: "4", to: "5", label: "yes" },
+        { from: "5", to: "6" },
+        { from: "6", to: "4" },
+        { from: "4", to: "7", label: "no" },
+        { from: "7", to: "8" },
+      ],
+      variables: ["n"],
+      notice: "Interactive Flowchart generated (Factorial logic). Ready to dry-run or edit!",
+    };
+  }
+
+  if (
     algoLower.includes("loop") ||
     algoLower.includes("print") ||
     algoLower.includes("1 to") ||
@@ -435,11 +468,11 @@ CRITICAL RULES:
 1. 'start' and 'end' nodes are mandatory (or 'stop' as type 'end').
 2. 'decision' nodes MUST have exactly two outgoing edges labeled 'yes' and 'no' (if handwriting has 'T'/'F', map 'T' -> 'yes' and 'F' -> 'no').
 3. 'input' nodes MUST have type 'input' and format 'Input (var1)' or 'Input (N)'.
-4. 'process' nodes should contain explicit assignments like 'i = 1', 'x = x + 1', or 'i = i + 1'. If handwriting has 'i++' or 'count++', transcribe as 'i = i + 1' or 'count = count + 1'.
+4. 'process' nodes should contain explicit assignments like 'i = 1', 'x = x + 1', or 'i = i + 1'. If handwriting has 'i++' or 'count++', transcribe as 'i = i + 1' or 'count = count + 1'. If handwriting has multiple assignments in one process box (e.g. 'i = 1' and 'Sum = 1' or 'Sum = 0'), write them separated by a comma (e.g. 'i = 1, Sum = 1').
 5. 'output' nodes should be in format 'Print (variable_name)' or 'Output (variable_name)'.
 6. Follow all arrows and loops faithfully: trace every arrow from its source node to its target node (including loops that go back to a previous decision node).
 7. Transcribe ALL shapes from top to bottom, including multiple decision diamonds (e.g. 'i <= n' and 'n % i == 0').
-8. Extract ONLY true user input variables (e.g. 'n' from 'Input n'). Do NOT include initialized loop counters (like 'i') or intermediate variables in 'variables'.
+8. Extract ONLY true user input variables (e.g. 'n' from 'Input n'). Do NOT include initialized loop counters (like 'i' or 'sum') in 'variables'.
 9. If handwriting has conditions like 'i <= n' or 'n % i == 0', transcribe them accurately.
 10. Return ONLY valid JSON matching the format above.
 `;

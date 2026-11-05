@@ -247,6 +247,45 @@ function App() {
 
   /* ================= VARIABLE ANALYSIS & SYNCHRONIZATION ================= */
 
+  // Helper to split process box text into individual executable statements
+  // Supports commas ("i = 1, Sum = 1"), newlines, and semicolons
+  const splitStatements = (text) => {
+    if (!text) return [];
+    const rawLines = text.split(/\r?\n|;/);
+    const statements = [];
+
+    rawLines.forEach(line => {
+      const trimmedLine = line.trim();
+      if (!trimmedLine) return;
+
+      if (trimmedLine.includes(',')) {
+        // Split on comma if what follows looks like an assignment (e.g. "Sum = 1", "set sum = 1", "i++")
+        const subStmts = trimmedLine.split(/\s*,\s*(?=(?:(?:let|set|int|var|float|const)\s+)?[a-zA-Z_]\w*\s*(?:=|\+=|-=|\*=|\/=|\+\+|--|:=|<-))/i);
+        if (subStmts.length > 1) {
+          subStmts.forEach(s => {
+            const t = s.trim();
+            if (t) statements.push(t);
+          });
+          return;
+        }
+
+        // Fallback: split by commas outside parentheses if each chunk looks like an assignment or expression
+        const commaParts = trimmedLine.split(/\s*,\s*(?![^(]*\))/);
+        if (commaParts.length > 1 && commaParts.every(p => /[=+\-*:<-]/.test(p))) {
+          commaParts.forEach(s => {
+            const t = s.trim();
+            if (t) statements.push(t);
+          });
+          return;
+        }
+      }
+
+      statements.push(trimmedLine);
+    });
+
+    return statements;
+  };
+
   const analyzeVariables = (flowchart) => {
     if (!flowchart || !flowchart.nodes) {
       return { inputVars: [], processVars: [], initialVals: {} };
@@ -267,23 +306,26 @@ function App() {
           .filter(Boolean)
           .forEach(v => inputVars.add(v));
       } else if (node.type === 'process') {
-        let clean = text.replace(/^(let|set|int|var|float|const|initialize|init)\s+/i, '').trim();
-        clean = clean.replace(/:=|<-/g, '=');
-        const parts = clean.split('=');
-        if (parts.length >= 2) {
-          const v = parts[0].trim().toLowerCase();
-          processVars.add(v);
-          const rhs = parts.slice(1).join('=').trim();
-          if (/^-?\d+(\.\d+)?$/.test(rhs)) {
-            initialVals[v] = parseFloat(rhs);
+        const statements = splitStatements(text);
+        statements.forEach(stmt => {
+          let clean = stmt.replace(/^(let|set|int|var|float|const|initialize|init)\s+/i, '').trim();
+          clean = clean.replace(/:=|<-/g, '=');
+          const parts = clean.split('=');
+          if (parts.length >= 2) {
+            const v = parts[0].trim().toLowerCase();
+            processVars.add(v);
+            const rhs = parts.slice(1).join('=').trim();
+            if (/^-?\d+(\.\d+)?$/.test(rhs)) {
+              initialVals[v] = parseFloat(rhs);
+            }
+          } else if (clean.includes('+=')) {
+            const v = clean.split('+=')[0].trim().toLowerCase();
+            processVars.add(v);
+          } else if (clean.match(/^([a-zA-Z_]\w*)\s*(\+\+|--)$/)) {
+            const v = clean.match(/^([a-zA-Z_]\w*)/)[1].toLowerCase();
+            processVars.add(v);
           }
-        } else if (clean.includes('+=')) {
-          const v = clean.split('+=')[0].trim().toLowerCase();
-          processVars.add(v);
-        } else if (clean.match(/^([a-zA-Z_]\w*)\s*(\+\+|--)$/)) {
-          const v = clean.match(/^([a-zA-Z_]\w*)/)[1].toLowerCase();
-          processVars.add(v);
-        }
+        });
       }
     });
 
@@ -331,18 +373,29 @@ function App() {
     const numVal = parseFloat(val) || 0;
     setVariables(prev => ({ ...prev, [varName]: numVal }));
 
-    // If this variable has an initialization node in flowchart (e.g. "i = 0" or "i = 1")
+    // If this variable has an initialization node in flowchart (e.g. "i = 0" or "i = 1, Sum = 1")
     // automatically sync the node text to match what the user defined!
     if (flowchartData && flowchartData.nodes) {
       const updatedNodes = flowchartData.nodes.map(node => {
         if (node.type === 'process') {
-          const clean = node.text.replace(/^(let|set|int|var|float|const|initialize|init)\s+/i, '').trim();
-          const parts = clean.split('=');
-          if (parts.length >= 2 && parts[0].trim().toLowerCase() === varName) {
-            const rhs = parts.slice(1).join('=').trim();
-            if (/^-?\d+(\.\d+)?$/.test(rhs)) {
-              return { ...node, text: `${varName} = ${numVal}` };
+          const statements = splitStatements(node.text);
+          let modified = false;
+          const newStatements = statements.map(stmt => {
+            const clean = stmt.replace(/^(let|set|int|var|float|const|initialize|init)\s+/i, '').trim();
+            const parts = clean.split('=');
+            if (parts.length >= 2 && parts[0].trim().toLowerCase() === varName) {
+              const rhs = parts.slice(1).join('=').trim();
+              if (/^-?\d+(\.\d+)?$/.test(rhs)) {
+                modified = true;
+                return `${varName} = ${numVal}`;
+              }
             }
+            return stmt;
+          });
+
+          if (modified) {
+            const separator = node.text.includes('\n') ? '\n' : (node.text.includes(';') ? '; ' : ', ');
+            return { ...node, text: newStatements.join(separator) };
           }
         }
         return node;
@@ -373,16 +426,20 @@ function App() {
     setFlowchartData(prev => ({ ...prev, nodes: updatedNodes }));
     setEditingNodeId(null);
 
-    // If user edited an assignment (like i = 1), also sync variables!
-    const clean = newText.replace(/^(let|set|int|var|float|const|initialize|init)\s+/i, '').trim();
-    const parts = clean.split('=');
-    if (parts.length >= 2) {
-      const v = parts[0].trim().toLowerCase();
-      const rhs = parts.slice(1).join('=').trim();
-      if (/^-?\d+(\.\d+)?$/.test(rhs)) {
-        setVariables(prev => ({ ...prev, [v]: parseFloat(rhs) }));
+    // If user edited an assignment (like i = 1 or i = 1, Sum = 1), also sync variables!
+    const statements = splitStatements(newText);
+    statements.forEach(stmt => {
+      let clean = stmt.replace(/^(let|set|int|var|float|const|initialize|init)\s+/i, '').trim();
+      clean = clean.replace(/:=|<-/g, '=');
+      const parts = clean.split('=');
+      if (parts.length >= 2) {
+        const v = parts[0].trim().toLowerCase();
+        const rhs = parts.slice(1).join('=').trim();
+        if (/^-?\d+(\.\d+)?$/.test(rhs)) {
+          setVariables(prev => ({ ...prev, [v]: parseFloat(rhs) }));
+        }
       }
-    }
+    });
   };
 
   /* ================= FLOWCHART GENERATION ================= */
@@ -484,15 +541,19 @@ function App() {
     const currentVars = { ...variables };
     flowchartData.nodes.forEach(node => {
       if (node.type === 'process') {
-        const clean = node.text.replace(/^(let|set|int|var|float|const|initialize|init)\s+/i, '').trim();
-        const parts = clean.split('=');
-        if (parts.length >= 2) {
-          const v = parts[0].trim().toLowerCase();
-          const rhs = parts.slice(1).join('=').trim();
-          if (/^-?\d+(\.\d+)?$/.test(rhs) && currentVars[v] === undefined) {
-            currentVars[v] = parseFloat(rhs);
+        const statements = splitStatements(node.text);
+        statements.forEach(stmt => {
+          let clean = stmt.replace(/^(let|set|int|var|float|const|initialize|init)\s+/i, '').trim();
+          clean = clean.replace(/:=|<-/g, '=');
+          const parts = clean.split('=');
+          if (parts.length >= 2) {
+            const v = parts[0].trim().toLowerCase();
+            const rhs = parts.slice(1).join('=').trim();
+            if (/^-?\d+(\.\d+)?$/.test(rhs) && currentVars[v] === undefined) {
+              currentVars[v] = parseFloat(rhs);
+            }
           }
-        }
+        });
       }
     });
 
@@ -554,9 +615,8 @@ function App() {
     }
   };
 
-  const executeCode = (text, vars) => {
-    if (!text) return { success: false, error: 'Empty process statement' };
-    let clean = text.trim();
+  const executeSingleStatement = (cleanStmt, vars) => {
+    let clean = cleanStmt.trim();
 
     // 1. Increment / Decrement: count++, i++, count--, i--
     const incMatch = clean.match(/^([a-zA-Z_]\w*)\s*(\+\+|--)$/);
@@ -565,14 +625,14 @@ function App() {
       if (vars[v] === undefined) {
         return {
           success: false,
-          error: `Variable Error: Variable '${v}' is unassigned before '${text}'! Define it first.`
+          error: `Variable Error: Variable '${v}' is unassigned before '${cleanStmt}'! Define it first.`
         };
       }
       vars[v] = incMatch[2] === '++' ? vars[v] + 1 : vars[v] - 1;
       return { success: true, value: vars[v] };
     }
 
-    // 2. Compound assignment: i += 1, count += 1, i -= 1
+    // 2. Compound assignment: i += 1, count += 1, i -= 1, sum *= i
     const compoundMatch = clean.match(/^([a-zA-Z_]\w*)\s*(\+=|-=|\*=|\/=)\s*(.+)$/);
     if (compoundMatch) {
       const v = compoundMatch[1].toLowerCase();
@@ -582,7 +642,7 @@ function App() {
       if (vars[v] === undefined) {
         return {
           success: false,
-          error: `Variable Error: Variable '${v}' must be initialized before using '${op}' in '${text}'!`
+          error: `Variable Error: Variable '${v}' must be initialized before using '${op}' in '${cleanStmt}'!`
         };
       }
       clean = `${v} = ${v} ${op[0]} (${rhs})`;
@@ -596,7 +656,7 @@ function App() {
     if (parts.length < 2) {
       return {
         success: false,
-        error: `Syntax Error in process node: "${text}" is not a valid assignment (e.g. "x = 5").`
+        error: `Syntax Error in process node: "${cleanStmt}" is not a valid assignment (e.g. "x = 5").`
       };
     }
 
@@ -606,7 +666,7 @@ function App() {
     if (!/^[a-zA-Z_]\w*$/.test(varName)) {
       return {
         success: false,
-        error: `Syntax Error: "${parts[0].trim()}" is not a valid variable name in "${text}".`
+        error: `Syntax Error: "${parts[0].trim()}" is not a valid variable name in "${cleanStmt}".`
       };
     }
 
@@ -626,7 +686,7 @@ function App() {
       if (!reserved.has(tok) && vars[tok] === undefined) {
         return {
           success: false,
-          error: `Variable Error: Variable '${tok}' is used in "${text}" but was never assigned a value!`
+          error: `Variable Error: Variable '${tok}' is used in "${cleanStmt}" but was never assigned a value!`
         };
       }
     }
@@ -639,7 +699,7 @@ function App() {
         if (denom === '0' || vars[denom] === 0) {
           return {
             success: false,
-            error: `Math Error: Division by zero in "${text}" (denominator '${denom}' is 0)!`
+            error: `Math Error: Division by zero in "${cleanStmt}" (denominator '${denom}' is 0)!`
           };
         }
       }
@@ -657,12 +717,12 @@ function App() {
       if (val === Infinity || val === -Infinity || Number.isNaN(val)) {
         return {
           success: false,
-          error: `Math Error in "${text}": Result is ${val} (Invalid number or division by zero)!`
+          error: `Math Error in "${cleanStmt}": Result is ${val} (Invalid number or division by zero)!`
         };
       }
 
       if (typeof val === 'number' && !Number.isInteger(val)) {
-        if (text.includes('/')) {
+        if (cleanStmt.includes('/')) {
           val = Math.trunc(val);
         } else {
           val = Number(val.toFixed(4));
@@ -672,12 +732,26 @@ function App() {
       vars[varName] = val;
       return { success: true, value: val };
     } catch (err) {
-      console.error('Execute code failed for:', text, mathExpression, err);
+      console.error('Execute code failed for:', cleanStmt, mathExpression, err);
       return {
         success: false,
-        error: `Execution Error in "${text}": ${err.message}`
+        error: `Execution Error in "${cleanStmt}": ${err.message}`
       };
     }
+  };
+
+  const executeCode = (text, vars) => {
+    if (!text) return { success: false, error: 'Empty process statement' };
+    const statements = splitStatements(text);
+    if (statements.length === 0) return { success: false, error: 'Empty process statement' };
+
+    let lastVal = undefined;
+    for (const stmt of statements) {
+      const res = executeSingleStatement(stmt, vars);
+      if (!res.success) return res;
+      lastVal = res.value;
+    }
+    return { success: true, value: lastVal };
   };
 
   const extractOutput = (text, vars) => {
@@ -748,6 +822,11 @@ function App() {
       matchedEdge = edges.find(
         e => e.label && trueLabels.includes(e.label.toString().toLowerCase().trim())
       );
+      if (!matchedEdge) {
+        matchedEdge = edges.find(
+          e => !e.label || !falseLabels.includes(e.label.toString().toLowerCase().trim())
+        );
+      }
     } else if (isTrue === false) {
       matchedEdge = edges.find(
         e => e.label && falseLabels.includes(e.label.toString().toLowerCase().trim())
