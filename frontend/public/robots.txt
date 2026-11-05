@@ -3,5 +3,4 @@ User-agent: *
 Allow: /
 
 # Sitemap
-Sitemap: /sitemap.xml
-
+Sitemap: https://frontend-mocha-nine-84mvyfs6df.vercel.app/sitemap.xml

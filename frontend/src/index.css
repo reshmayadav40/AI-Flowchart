@@ -1292,4 +1292,22 @@ body {
   border-color: rgba(239, 68, 68, 0.3);
 }
 
+/* SEMANTIC FOOTER */
+.app-footer {
+  margin-top: 3.5rem;
+  padding: 2rem 1rem 1rem;
+  text-align: center;
+  border-top: 1px solid var(--border-light);
+  color: var(--text-muted);
+}
+.app-footer a {
+  text-decoration: none;
+  transition: color 0.2s;
+}
+.app-footer a:hover {
+  color: var(--text-main) !important;
+  text-decoration: underline;
+}
+
+
 

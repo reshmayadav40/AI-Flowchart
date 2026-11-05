@@ -28,6 +28,7 @@ import {
   Check
 } from 'lucide-react';
 import './index.css';
+import SEO from './components/SEO.jsx';
 
 function App() {
   let rawApiUrl = import.meta.env.VITE_API_BASE_URL || (import.meta.env.PROD ? 'https://ai-flowchart.onrender.com' : 'http://localhost:5000');
@@ -1241,10 +1242,46 @@ function App() {
     );
   });
 
+  /* ================= DYNAMIC SEO STATE ================= */
+  const getSeoData = () => {
+    if (showHistory) {
+      return {
+        title: 'Algorithm History & Saves | Antigravity AI Flowchart',
+        description: 'View and reload your saved flowcharts and execution history in Antigravity AI Studio.',
+        path: '/history'
+      };
+    }
+    if (showAdminModal) {
+      return {
+        title: 'Admin Console | Antigravity AI Flowchart',
+        description: 'System dashboard and telemetry oversight for Antigravity AI Flowchart platform.',
+        path: '/admin'
+      };
+    }
+    if (mode === 'image') {
+      return {
+        title: 'Image to Flowchart AI | Antigravity AI Studio',
+        description: 'Convert flowchart sketches or handwritten images into interactive algorithms and executable diagrams.',
+        path: '/image-mode'
+      };
+    }
+    return {
+      title: 'Antigravity AI Flowchart | Visual Algorithm Simulator',
+      description: 'Generate, visualize, and dry-run algorithms and flowcharts interactively with Antigravity AI Flowchart.',
+      path: '/'
+    };
+  };
+  const currentSeo = getSeoData();
+
   /* ================= RENDER: MAIN APPLICATION ================= */
 
   return (
     <div className="app-container">
+      <SEO
+        title={currentSeo.title}
+        description={currentSeo.description}
+        path={currentSeo.path}
+      />
       {/* TOP NAVIGATION BAR */}
       <nav className="top-navbar">
         <div className="brand-section">
@@ -1304,7 +1341,7 @@ function App() {
         )}
       </header>
 
-      <div className="content">
+      <main className="content">
         {/* INPUT CARD */}
         <section className="card">
           <h2>1. Select Input</h2>
@@ -1538,7 +1575,7 @@ function App() {
             </section>
           </div>
         )}
-      </div>
+      </main>
 
       {/* USER HISTORY MODAL */}
       {showHistory && (
@@ -1704,7 +1741,12 @@ function App() {
                               title="Click to view full image"
                               onClick={() => setZoomedImage(item.imageData)}
                             >
-                              <img src={item.imageData} alt="Flowchart" className="admin-thumbnail-img" />
+                              <img
+                                src={item.imageData}
+                                alt={item.algorithm ? `Flowchart preview: ${item.algorithm.substring(0, 30)}` : 'Flowchart Diagram Preview'}
+                                className="admin-thumbnail-img"
+                                loading="lazy"
+                              />
                             </div>
                           ) : item.inputType === 'image' ? (
                             <div className="admin-thumbnail-wrapper">
@@ -1749,10 +1791,20 @@ function App() {
             <button className="image-zoom-close" onClick={() => setZoomedImage(null)}>
               <X size={20} />
             </button>
-            <img src={zoomedImage} alt="Uploaded Flowchart Full View" />
+            <img src={zoomedImage} alt="Uploaded Flowchart Full View" loading="lazy" />
           </div>
         </div>
       )}
+
+      {/* SEMANTIC FOOTER FOR ACCESSIBILITY & SEO */}
+      <footer className="app-footer">
+        <p>&copy; {new Date().getFullYear()} Antigravity AI Flowchart. Interactive algorithm & flowchart simulator.</p>
+        <p style={{ marginTop: '0.5rem', fontSize: '0.8rem' }}>
+          <a href="#root" style={{ color: 'var(--text-muted)' }}>Back to Top</a> •{' '}
+          <a href="/sitemap.xml" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--text-muted)' }}>Sitemap</a> •{' '}
+          <a href="/robots.txt" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--text-muted)' }}>Robots.txt</a>
+        </p>
+      </footer>
     </div>
   );
 }
