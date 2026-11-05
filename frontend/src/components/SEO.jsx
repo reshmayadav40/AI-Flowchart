@@ -1,10 +1,31 @@
-import React, { useEffect } from 'react';
-import { Helmet } from 'react-helmet-async';
+import { useEffect } from 'react';
 
 const SITE_URL = 'https://frontend-mocha-nine-84mvyfs6df.vercel.app';
 const DEFAULT_TITLE = 'Antigravity AI Flowchart | Visual Algorithm Simulator';
 const DEFAULT_DESCRIPTION = 'Generate, visualize, and dry-run algorithms and flowcharts interactively with Antigravity AI Flowchart. An active cloud studio for students and developers.';
 const DEFAULT_IMAGE = `${SITE_URL}/vite.svg`;
+
+function updateMetaTag(attrName, attrValue, content) {
+  if (!content) return;
+  let element = document.querySelector(`meta[${attrName}="${attrValue}"]`);
+  if (!element) {
+    element = document.createElement('meta');
+    element.setAttribute(attrName, attrValue);
+    document.head.appendChild(element);
+  }
+  element.setAttribute('content', content);
+}
+
+function updateLinkTag(rel, href) {
+  if (!href) return;
+  let element = document.querySelector(`link[rel="${rel}"]`);
+  if (!element) {
+    element = document.createElement('link');
+    element.setAttribute(rel, rel);
+    document.head.appendChild(element);
+  }
+  element.setAttribute('href', href);
+}
 
 export default function SEO({
   title = DEFAULT_TITLE,
@@ -17,44 +38,40 @@ export default function SEO({
   const canonicalUrl = `${SITE_URL}${path}`;
   const fullImageUrl = image.startsWith('http') ? image : `${SITE_URL}${image}`;
 
-  // DOM fallback ensures immediate update even before full hydration
   useEffect(() => {
-    if (title) document.title = title;
-    const metaDesc = document.querySelector('meta[name="description"]');
-    if (metaDesc && description) {
-      metaDesc.setAttribute('content', description);
+    // Dynamically update document title
+    if (title) {
+      document.title = title;
     }
-  }, [title, description]);
 
-  return (
-    <Helmet>
-      {/* Primary Titles & Descriptions */}
-      <title>{title}</title>
-      <meta name="description" content={description} />
-      <link rel="canonical" href={canonicalUrl} />
+    // Update primary SEO meta tags
+    updateMetaTag('name', 'description', description);
+    updateLinkTag('canonical', canonicalUrl);
 
-      {/* Open Graph */}
-      <meta property="og:site_name" content="Antigravity AI Flowchart" />
-      <meta property="og:type" content={type} />
-      <meta property="og:title" content={title} />
-      <meta property="og:description" content={description} />
-      <meta property="og:url" content={canonicalUrl} />
-      <meta property="og:image" content={fullImageUrl} />
-      <meta property="og:locale" content="en_US" />
+    // Update Open Graph tags
+    updateMetaTag('property', 'og:title', title);
+    updateMetaTag('property', 'og:description', description);
+    updateMetaTag('property', 'og:url', canonicalUrl);
+    updateMetaTag('property', 'og:image', fullImageUrl);
+    updateMetaTag('property', 'og:type', type);
 
-      {/* Twitter Cards */}
-      <meta name="twitter:card" content="summary_large_image" />
-      <meta name="twitter:title" content={title} />
-      <meta name="twitter:description" content={description} />
-      <meta name="twitter:image" content={fullImageUrl} />
+    // Update Twitter Card tags
+    updateMetaTag('name', 'twitter:title', title);
+    updateMetaTag('name', 'twitter:description', description);
+    updateMetaTag('name', 'twitter:image', fullImageUrl);
 
-      {/* Dynamic JSON-LD Structured Data */}
-      {schema && (
-        <script type="application/ld+json">
-          {JSON.stringify(schema)}
-        </script>
-      )}
-    </Helmet>
-  );
+    // Update JSON-LD structured data dynamically if provided
+    if (schema) {
+      let script = document.getElementById('dynamic-jsonld');
+      if (!script) {
+        script = document.createElement('script');
+        script.id = 'dynamic-jsonld';
+        script.type = 'application/ld+json';
+        document.head.appendChild(script);
+      }
+      script.textContent = JSON.stringify(schema);
+    }
+  }, [title, description, canonicalUrl, fullImageUrl, type, schema]);
+
+  return null;
 }
-
