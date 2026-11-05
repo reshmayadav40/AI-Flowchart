@@ -1,0 +1,7 @@
+# Robots.txt for Antigravity AI Flowchart
+User-agent: *
+Allow: /
+
+# Sitemap
+Sitemap: /sitemap.xml
+
